@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/date_utils.dart';
 import '../../core/widgets/banner_ad_widget.dart';
 import '../../data/models/recipe.dart';
 import '../../data/models/weekly_plan.dart';
@@ -57,7 +58,13 @@ class _WeeklyPlannerScreenState extends ConsumerState<WeeklyPlannerScreen> {
       ),
       body: Column(
         children: [
-          _WeekHeader(weekStartDate: plan.weekStartDate),
+          _WeekHeader(
+            weekStartDate: plan.weekStartDate,
+            isCurrentWeek: isSameCalendarDay(plan.weekStartDate, startOfWeek(DateTime.now())),
+            onPrevious: () => ref.read(weeklyPlanProvider.notifier).goToPreviousWeek(),
+            onNext: () => ref.read(weeklyPlanProvider.notifier).goToNextWeek(),
+            onGoToCurrent: () => ref.read(weeklyPlanProvider.notifier).goToCurrentWeek(),
+          ),
           _DaySelector(
             selectedDay: _selectedDay,
             onDaySelected: (day) => setState(() => _selectedDay = day),
@@ -164,17 +171,22 @@ class _WeeklyPlannerScreenState extends ConsumerState<WeeklyPlannerScreen> {
   }
 }
 
-/// Görüntülenen haftanın tarih aralığını ("11 - 17 Ağustos") gösteren
-/// başlık şeridi.
+/// Görüntülenen haftanın tarih aralığını gösteren başlık + ileri/geri oklar.
 class _WeekHeader extends StatelessWidget {
-  const _WeekHeader({required this.weekStartDate});
+  const _WeekHeader({
+    required this.weekStartDate,
+    required this.isCurrentWeek,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onGoToCurrent,
+  });
 
   final DateTime weekStartDate;
+  final bool isCurrentWeek;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onGoToCurrent;
 
-  // `intl` paketinin `initializeDateFormatting('tr_TR')` KURULUMU
-  // gerektiren yerel ayar (locale) verisine bağımlı kalmamak için, ay
-  // isimlerini burada kendimiz, sabit bir Türkçe liste ile yazıyoruz. Bu,
-  // main.dart'ta ekstra bir başlatma adımına gerek bırakmaz.
   static const List<String> _turkishMonths = [
     'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
     'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
@@ -184,14 +196,48 @@ class _WeekHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final weekEndDate = weekStartDate.add(const Duration(days: 6));
     final rangeText = '${weekStartDate.day} - ${weekEndDate.day} ${_turkishMonths[weekEndDate.month - 1]}';
+    final label = isCurrentWeek ? 'Bu hafta' : 'Hafta';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
       child: Row(
         children: [
-          const Icon(Icons.calendar_today, size: 16, color: AppColors.textMuted),
-          const SizedBox(width: 8),
-          Text('Bu hafta: $rangeText', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textMuted)),
+          IconButton(
+            tooltip: 'Önceki hafta',
+            onPressed: onPrevious,
+            icon: const Icon(Icons.chevron_left),
+            color: AppColors.primaryGreenDark,
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  '$label: $rangeText',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                if (!isCurrentWeek)
+                  TextButton(
+                    onPressed: onGoToCurrent,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 28),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Bugüne dön'),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Sonraki hafta',
+            onPressed: onNext,
+            icon: const Icon(Icons.chevron_right),
+            color: AppColors.primaryGreenDark,
+          ),
         ],
       ),
     );

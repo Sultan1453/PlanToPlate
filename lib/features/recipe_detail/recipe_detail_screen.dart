@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../data/models/ingredient.dart';
@@ -13,10 +15,64 @@ class RecipeDetailScreen extends StatelessWidget {
 
   final Recipe recipe;
 
+  String _formatRecipeText() {
+    final buffer = StringBuffer();
+    buffer.writeln(recipe.title);
+    buffer.writeln('${recipe.servings} kişilik · ${recipe.cookingMethod.displayName}');
+    buffer.writeln(
+      '${recipe.nutrient.calories.toStringAsFixed(0)} kcal · '
+      'P ${recipe.nutrient.protein.toStringAsFixed(0)}g · '
+      'K ${recipe.nutrient.carbs.toStringAsFixed(0)}g · '
+      'Y ${recipe.nutrient.fat.toStringAsFixed(0)}g',
+    );
+    buffer.writeln();
+    buffer.writeln('Malzemeler:');
+    for (final ingredient in recipe.ingredients) {
+      final quantityText = ingredient.quantity == ingredient.quantity.roundToDouble()
+          ? ingredient.quantity.toStringAsFixed(0)
+          : ingredient.quantity.toStringAsFixed(1);
+      buffer.writeln('- $quantityText ${ingredient.unit} ${ingredient.name}');
+    }
+    buffer.writeln();
+    buffer.writeln('Yapılışı:');
+    for (var i = 0; i < recipe.steps.length; i++) {
+      buffer.writeln('${i + 1}. ${recipe.steps[i]}');
+    }
+    buffer.writeln();
+    buffer.writeln('PlanToPlate ile hazırlandı');
+    return buffer.toString();
+  }
+
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: _formatRecipeText()));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Tarif panoya kopyalandı.')),
+    );
+  }
+
+  Future<void> _share() async {
+    await Share.share(_formatRecipeText(), subject: recipe.title);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(recipe.title)),
+      appBar: AppBar(
+        title: Text(recipe.title),
+        actions: [
+          IconButton(
+            tooltip: 'Kopyala',
+            onPressed: () => _copy(context),
+            icon: const Icon(Icons.copy_outlined),
+          ),
+          IconButton(
+            tooltip: 'Paylaş',
+            onPressed: _share,
+            icon: const Icon(Icons.share_outlined),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

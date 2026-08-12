@@ -8,6 +8,7 @@ import 'data/services/ads_service.dart';
 import 'data/services/hive_service.dart';
 import 'data/services/notification_service.dart';
 import 'data/services/subscription_service.dart';
+import 'features/onboarding/onboarding_screen.dart';
 import 'features/shell/app_shell.dart';
 
 /// Uygulamanın giriş noktası.
@@ -80,7 +81,11 @@ class MyApp extends StatelessWidget {
       title: 'PlanToPlate: AI Meal Planner',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const AppShell(),
+      // İlk açılışta kısa bir kullanım turu; bir kez tamamlanınca bir daha
+      // gösterilmez (Hive settings kutusunda saklanır).
+      home: HiveService.hasCompletedOnboarding
+          ? const AppShell()
+          : const OnboardingScreen(),
     );
   }
 }

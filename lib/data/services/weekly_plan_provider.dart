@@ -45,6 +45,41 @@ class WeeklyPlanNotifier extends StateNotifier<WeeklyPlan> {
     state = state;
   }
 
+  /// Verilen Pazartesi tarihine ait planı yükler; yoksa boş bir tane oluşturur.
+  WeeklyPlan _loadOrCreateWeek(DateTime weekStart) {
+    final normalized = startOfWeek(weekStart);
+    final box = HiveService.weeklyPlanBox;
+
+    for (final plan in box.values) {
+      if (isSameCalendarDay(plan.weekStartDate, normalized)) {
+        return plan;
+      }
+    }
+
+    final newPlan = WeeklyPlan(id: const Uuid().v4(), weekStartDate: normalized);
+    box.put(newPlan.id, newPlan);
+    return newPlan;
+  }
+
+  /// Bir önceki haftaya geçer.
+  void goToPreviousWeek() {
+    state = _loadOrCreateWeek(state.weekStartDate.subtract(const Duration(days: 7)));
+  }
+
+  /// Bir sonraki haftaya geçer.
+  void goToNextWeek() {
+    state = _loadOrCreateWeek(state.weekStartDate.add(const Duration(days: 7)));
+  }
+
+  /// Takvimdeki içinde bulunulan haftaya döner.
+  void goToCurrentWeek() {
+    state = _loadOrCreateWeek(DateTime.now());
+  }
+
+  /// Görüntülenen hafta, takvimdeki "bu hafta" mı?
+  bool get isViewingCurrentWeek =>
+      isSameCalendarDay(state.weekStartDate, startOfWeek(DateTime.now()));
+
   /// Belirli bir gün/öğün hücresine bir tarif atar. AI üretimi bittiğinde
   /// (bkz. `WeeklyPlannerScreen`) çağrılır.
   void assignRecipe(DayOfWeek day, MealType mealType, Recipe recipe) {

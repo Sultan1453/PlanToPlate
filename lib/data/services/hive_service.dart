@@ -30,6 +30,12 @@ class HiveService {
   /// Kullanıcı kaydının saklandığı kutunun adı.
   static const String userBoxName = 'user_box';
 
+  /// Basit ayarlar (onboarding görüldü mü vb.) için tip-bağımsız kutu.
+  static const String settingsBoxName = 'settings_box';
+
+  /// Onboarding ekranının en az bir kez tamamlanıp tamamlanmadığı.
+  static const String onboardingCompletedKey = 'onboarding_completed';
+
   /// Uygulamada sunucu hesabı olmadığı için, TEK kullanıcı kaydını hep bu
   /// sabit kimlikle (key) buluruz. Bkz. `data/models/user.dart`.
   static const String localUserId = 'local_user';
@@ -57,6 +63,7 @@ class HiveService {
     // `HiveService.weeklyPlanBox` gibi getter'larla her yerden erişilebilir.
     await Hive.openBox<WeeklyPlan>(weeklyPlanBoxName);
     await Hive.openBox<User>(userBoxName);
+    await Hive.openBox(settingsBoxName);
   }
 
   /// Her modelin (ve enum'un) `build_runner` tarafından üretilen
@@ -111,6 +118,16 @@ class HiveService {
 
   /// Kullanıcı kaydının tutulduğu kutuya kısayol.
   static Box<User> get userBox => Hive.box<User>(userBoxName);
+
+  /// Basit ayarlar kutusu (onboarding vb.).
+  static Box get settingsBox => Hive.box(settingsBoxName);
+
+  static bool get hasCompletedOnboarding =>
+      settingsBox.get(onboardingCompletedKey, defaultValue: false) == true;
+
+  static Future<void> markOnboardingCompleted() async {
+    await settingsBox.put(onboardingCompletedKey, true);
+  }
 
   /// Kutuda kayıtlı kullanıcıyı getirir; HİÇ kayıt yoksa (uygulama ilk kez
   /// açıldıysa) yeni, "free" planlı bir kullanıcı oluşturup kaydeder ve onu
