@@ -74,6 +74,12 @@ class UserNotifier extends StateNotifier<User> {
     return true;
   }
 
+  /// Az önce [tryConsumePhotoUpload] ile harcanan fotoğraf hakkını GERİ verir.
+  void refundLastPhotoUpload() {
+    state.undoPhotoUpload();
+    _persistAndNotify();
+  }
+
   /// Kullanıcı ödüllü reklamı sonuna kadar izleyip ödülü kazandığında
   /// çağrılır (Kural 2-B: "Reklam İzle, +1 AI Tarifi Kazan").
   void grantRewardedAdCredit() {

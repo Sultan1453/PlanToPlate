@@ -90,33 +90,68 @@ class _WeeklyPlannerScreenState extends ConsumerState<WeeklyPlannerScreen> {
   }
 
   Future<void> _handleAddMeal(MealType mealType) async {
-    final canGenerate = ref.read(userProvider.notifier).tryConsumeRecipeGeneration();
-    if (!canGenerate) {
-      if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen()));
-      return;
-    }
+    // Önce kullanıcıdan girdi al; vazgeçerse hiçbir hak harcanmasın.
+    final input = await showMealNameInputSheet(context, mealType: mealType);
+    if (input == null || !mounted) return;
 
-    final mealName = await showMealNameInputSheet(context, mealType: mealType);
-    if (mealName == null || mealName.trim().isEmpty) {
-      // Kullanıcı vazgeçti: harcanan hakkı GERİ ver, gerçek bir tarif
-      // üretilmedi.
-      ref.read(userProvider.notifier).refundLastRecipeGeneration();
-      return;
+    final userNotifier = ref.read(userProvider.notifier);
+    var consumedRecipe = false;
+    var consumedPhoto = false;
+
+    if (input.isPhoto) {
+      // Fotoğraftan tarif: hem fotoğraf hakkı (haftada 1) HEM DE AI tarif
+      // hakkı (haftada 3) harcanır — çünkü sonuç yine bir AI tarifidir.
+      if (!userNotifier.tryConsumePhotoUpload()) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bu haftaki fotoğraf hakkın doldu. Premium ile sınırsız kullanabilirsin.'),
+          ),
+        );
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen()));
+        return;
+      }
+      consumedPhoto = true;
+
+      if (!userNotifier.tryConsumeRecipeGeneration()) {
+        userNotifier.refundLastPhotoUpload();
+        if (!mounted) return;
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen()));
+        return;
+      }
+      consumedRecipe = true;
+    } else {
+      if (!userNotifier.tryConsumeRecipeGeneration()) {
+        if (!mounted) return;
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PaywallScreen()));
+        return;
+      }
+      consumedRecipe = true;
     }
 
     setState(() => _isGenerating = true);
     try {
-      final recipe = await ref.read(recipeAiServiceProvider).generateRecipe(
-            id: DateTime.now().microsecondsSinceEpoch.toString(),
-            mealName: mealName.trim(),
-            mealType: mealType,
-          );
+      final ai = ref.read(recipeAiServiceProvider);
+      final id = DateTime.now().microsecondsSinceEpoch.toString();
+      final Recipe recipe;
+      if (input.isPhoto) {
+        recipe = await ai.generateRecipeFromPhoto(
+          id: id,
+          imageBytes: input.photoBytes!,
+          mimeType: input.photoMimeType ?? 'image/jpeg',
+          mealType: mealType,
+        );
+      } else {
+        recipe = await ai.generateRecipe(
+          id: id,
+          mealName: input.mealName!.trim(),
+          mealType: mealType,
+        );
+      }
       ref.read(weeklyPlanProvider.notifier).assignRecipe(_selectedDay, mealType, recipe);
     } on RecipeGenerationException catch (error) {
-      // AI üretimi başarısız oldu: hakkı GERİ ver, kullanıcı elinde tarif
-      // olmadan hak kaybetmesin.
-      ref.read(userProvider.notifier).refundLastRecipeGeneration();
+      if (consumedRecipe) userNotifier.refundLastRecipeGeneration();
+      if (consumedPhoto) userNotifier.refundLastPhotoUpload();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
     } finally {

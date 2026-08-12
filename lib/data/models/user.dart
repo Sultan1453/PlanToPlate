@@ -216,6 +216,15 @@ class User extends HiveObject {
     weeklyPhotoUploadCount += 1;
   }
 
+  /// [recordPhotoUpload]'ın geri alma karşılığı. Fotoğraf seçimi iptal
+  /// edildiğinde veya AI üretimi başarısız olduğunda çağrılır.
+  void undoPhotoUpload() {
+    if (isPremium) return;
+    if (weeklyPhotoUploadCount > 0) {
+      weeklyPhotoUploadCount -= 1;
+    }
+  }
+
   /// Kullanıcı ödüllü reklamı sonuna kadar izleyip ödülü kazandığında
   /// çağrılır (Kural 2-B). Bonus hak sayacını bir artırır.
   void grantRewardedAdCredit() {

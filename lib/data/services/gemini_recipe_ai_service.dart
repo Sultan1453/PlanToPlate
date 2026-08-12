@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:google_generative_ai/google_generative_ai.dart';
 
@@ -32,10 +33,10 @@ class GeminiRecipeAiService implements RecipeAiService {
         ),
       );
 
-  /// Kullanılan Gemini model adı. Google zaman zaman yeni model sürümleri
-  /// çıkarır; ileride daha yeni/güçlü bir modele geçmek istersen SADECE bu
-  /// satırı değiştirmen yeterli olacak.
-  static const String _modelName = 'gemini-2.5-flash';
+  /// Kullanılan Gemini model adı. Yeni Google AI Studio hesaplarında
+  /// `gemini-2.5-flash` artık kapatıldığı için (API 404 döner), hızlı ve
+  /// ücretsiz kota dostu `gemini-2.5-flash-lite` modelini kullanıyoruz.
+  static const String _modelName = 'gemini-2.5-flash-lite';
 
   final GenerativeModel _model;
 
@@ -45,10 +46,41 @@ class GeminiRecipeAiService implements RecipeAiService {
     required String mealName,
     required MealType mealType,
   }) async {
+    return _generateFromContents(
+      contents: [Content.text(_buildTextPrompt(mealName))],
+      id: id,
+      mealType: mealType,
+    );
+  }
+
+  @override
+  Future<Recipe> generateRecipeFromPhoto({
+    required String id,
+    required Uint8List imageBytes,
+    required String mimeType,
+    required MealType mealType,
+  }) async {
+    // Multimodal içerik: metin talimat + fotoğraf baytları birlikte gider.
+    // Gemini görüntüyü okuyup yemeği tanır ve aynı JSON şablonunda tarif üretir.
+    return _generateFromContents(
+      contents: [
+        Content.multi([
+          TextPart(_buildPhotoPrompt(mealType)),
+          DataPart(mimeType, imageBytes),
+        ]),
+      ],
+      id: id,
+      mealType: mealType,
+    );
+  }
+
+  Future<Recipe> _generateFromContents({
+    required List<Content> contents,
+    required String id,
+    required MealType mealType,
+  }) async {
     try {
-      final response = await _model.generateContent([
-        Content.text(_buildPrompt(mealName)),
-      ]);
+      final response = await _model.generateContent(contents);
 
       final rawText = response.text;
       if (rawText == null || rawText.trim().isEmpty) {
@@ -60,12 +92,8 @@ class GeminiRecipeAiService implements RecipeAiService {
       final decodedJson = jsonDecode(_stripMarkdownFences(rawText)) as Map<String, dynamic>;
       return Recipe.fromJson(decodedJson, id: id, mealType: mealType);
     } on RecipeGenerationException {
-      // Kendi fırlattığımız hatayı (yukarıdaki "boş cevap" durumu gibi)
-      // olduğu gibi yukarı iletiyoruz; aşağıdaki genel `catch` bloğu
-      // tarafından tekrar SARILMASINI istemiyoruz.
       rethrow;
     } on FormatException {
-      // `jsonDecode` bozuk/eksik bir JSON ile karşılaşırsa bu hatayı verir.
       throw RecipeGenerationException(
         'Yapay zekadan gelen cevap okunamadı. Lütfen tekrar dene.',
       );
@@ -75,15 +103,10 @@ class GeminiRecipeAiService implements RecipeAiService {
         'GEMINI_API_KEY değerini kontrol et.',
       );
     } on GenerativeAIException {
-      // Sunucu hatası, konum kısıtlaması gibi Gemini'ye özgü diğer TÜM
-      // hatalar için ortak, anlaşılır bir mesaj gösteriyoruz.
       throw RecipeGenerationException(
         'Yapay zeka servisine şu an ulaşılamıyor. Lütfen daha sonra tekrar dene.',
       );
     } catch (_) {
-      // Buraya genellikle İNTERNET BAĞLANTISI olmadığında düşülür
-      // (örn. `SocketException`). Kullanıcıya teknik terim göstermek
-      // yerine en olası nedeni söylüyoruz.
       throw RecipeGenerationException(
         'İnternet bağlantında bir sorun olabilir. Lütfen bağlantını '
         'kontrol edip tekrar dene.',
@@ -104,21 +127,8 @@ class GeminiRecipeAiService implements RecipeAiService {
     return trimmed.trim();
   }
 
-  /// Gemini'ye gönderilecek tam talimat metni (prompt).
-  ///
-  /// Burada ÇOK NET bir JSON şablonu ve kurallar veriyoruz; çünkü AI'dan
-  /// gelen cevabı doğrudan Adım 1'de yazdığımız `Recipe.fromJson` fabrikasına
-  /// besleyeceğiz — alan adları (title, ingredients, steps, nutrient,
-  /// cookingMethod...) ve değer seçenekleri (örn. "airfryer", "produce")
-  /// `Recipe`/`Ingredient` modelleriyle BİREBİR uyuşmalı.
-  String _buildPrompt(String mealName) {
+  String _jsonSchemaInstructions() {
     return '''
-Sen profesyonel bir Türk mutfağı şefi ve diyetisyensin. Kullanıcının istediği
-yemek için, SADECE aşağıdaki JSON şablonuna uyan, başka HİÇBİR açıklama,
-markdown işaretleyici veya yorum içermeyen bir cevap üret.
-
-İstenen yemek: "$mealName"
-
 JSON şablonu (TÜM alanlar zorunludur):
 {
   "title": "Yemeğin düzgün yazılmış tam adı",
@@ -154,6 +164,32 @@ Kurallar:
   hesaplanmalı (toplam tencere değil).
 - Cevabında SADECE geçerli JSON olsun; ```json kod bloğu, açıklama cümlesi
   veya ekstra metin EKLEME.
+''';
+  }
+
+  String _buildTextPrompt(String mealName) {
+    return '''
+Sen profesyonel bir Türk mutfağı şefi ve diyetisyensin. Kullanıcının istediği
+yemek için, SADECE aşağıdaki JSON şablonuna uyan, başka HİÇBİR açıklama,
+markdown işaretleyici veya yorum içermeyen bir cevap üret.
+
+İstenen yemek: "$mealName"
+
+${_jsonSchemaInstructions()}
+''';
+  }
+
+  String _buildPhotoPrompt(MealType mealType) {
+    return '''
+Sen profesyonel bir Türk mutfağı şefi ve diyetisyensin. Kullanıcı bir YEMEK
+FOTOĞRAFI gönderdi. Fotoğraftaki yemeği tanı (veya en yakın makul tahmini
+yap) ve bu yemek için SADECE aşağıdaki JSON şablonuna uyan bir tarif üret.
+
+Bu tarif "${mealType.displayName}" öğünü için planlanacak.
+Fotoğrafta yemek görünmüyorsa, yine de makul bir günlük yemek tarifi üret
+ama title alanına "(Fotoğraftan tahmin)" ekle.
+
+${_jsonSchemaInstructions()}
 ''';
   }
 }

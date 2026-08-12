@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../models/recipe.dart';
 
 /// Bir `RecipeAiService` uygulaması (özellikle gerçek Gemini motoru) tarif
@@ -19,44 +21,25 @@ class RecipeGenerationException implements Exception {
   String toString() => message;
 }
 
-/// "Bir yemek adından tarif üreten herhangi bir motorun uyması gereken
-/// sözleşme" (contract/interface).
-///
-/// BU SINIF NEDEN ÖNEMLİ? Bugün `MockRecipeAiService` (sahte, yerel veri
-/// tabanlı) motoru kullanıyoruz; Adım 5'te gerçek Google Gemini API'sine
-/// bağlandığımızda `GeminiRecipeAiService` adında YENİ bir sınıf yazacağız.
-/// Eğer uygulamanın diğer bölümleri (ekranlar) doğrudan
-/// "MockRecipeAiService" sınıfını tanısaydı, Gemini'ye geçerken o
-/// ekranlardaki KOD SATIRLARINI da değiştirmemiz gerekirdi.
-///
-/// Bunun yerine ekranlar sadece bu soyut (abstract) `RecipeAiService`
-/// sözleşmesini tanır. Hangi motorun ("Mock" mu "Gemini" mi) gerçekten
-/// çalıştığı, sadece TEK bir satırda (bağımlılık enjeksiyonu / dependency
-/// injection noktasında, `mock_recipe_ai_service.dart` dosyasının en
-/// altındaki `recipeAiServiceProvider`da) belirlenir. Böylece motoru
-/// değiştirmek, uygulamanın geri kalanını hiç etkilemez.
-///
-/// Bu yaklaşıma yazılımda "Clean Architecture" / "Dependency Inversion"
-/// (Bağımlılığın Tersine Çevrilmesi) prensibi denir: üst seviye kod (ekranlar)
-/// alt seviye detaylara (Mock mu, Gemini mi) değil, ORTAK BİR SÖZLEŞMEYE
-/// bağımlı olur.
+/// "Bir yemek adından veya fotoğraftan tarif üreten herhangi bir motorun
+/// uyması gereken sözleşme" (contract/interface).
 abstract class RecipeAiService {
   /// Verilen yemek adı (`mealName`) için yapay zekadan/yerel veri setinden
   /// tam bir tarif üretir.
-  ///
-  /// - `id`: Üretilecek `Recipe` nesnesine verilecek benzersiz kimlik.
-  ///   Bunu motor KENDİSİ üretmez; çağıran taraf (ekran/repository) verir,
-  ///   çünkü hangi haftalık plan hücresine ait olduğunu sadece o bilir.
-  /// - `mealName`: Kullanıcının yazdığı veya seçtiği yemek adı. Örn: "Fırında
-  ///   Tavuk But".
-  /// - `mealType`: Bu tarifin Kahvaltı/Öğle/Akşam için üretildiği bilgisi.
-  ///
-  /// Dönüş tipi `Future<Recipe>` olduğu için bu metod ASENKRON'dur (zaman
-  /// alabilir); hem gerçek API çağrısı hem de (kullanıcı deneyimini gerçekçi
-  /// tutmak için gecikme simüle eden) mock motoru bu şekilde çalışır.
   Future<Recipe> generateRecipe({
     required String id,
     required String mealName,
+    required MealType mealType,
+  });
+
+  /// Kullanıcının çektiği/galeriden seçtiği yemek fotoğrafından tarif üretir.
+  ///
+  /// `imageBytes`: fotoğrafın ham baytları (JPEG/PNG).
+  /// `mimeType`: örn. `image/jpeg` veya `image/png`.
+  Future<Recipe> generateRecipeFromPhoto({
+    required String id,
+    required Uint8List imageBytes,
+    required String mimeType,
     required MealType mealType,
   });
 }

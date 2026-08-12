@@ -7,8 +7,12 @@
     <!-- Telefon yeniden başlatıldığında (BOOT_COMPLETED), planlanmış
          haftalık alışveriş hatırlatmasının hayatta kalabilmesi için gerekli. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Fotoğraftan tarif: kameradan çekim için. Galeri seçimi Android 13+
+         fotoğraf seçicide ek izin gerektirmez. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
-        android:label="plan_to_plate"
+        android:label="PlanToPlate"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -39,15 +43,12 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Google AdMob'un uygulamayı tanıması için ZORUNLU olan
-             "Uygulama Kimliği" (Application ID). ÖNEMLİ: Aşağıdaki değer
-             Google'ın HERKESE AÇIK, resmi TEST kimliğidir — reklamlar
-             çalışır ama GERÇEK gelir üretmez. Play Store'a yayınlamadan
-             ÖNCE, kendi AdMob hesabından (admob.google.com) alacağın GERÇEK
-             uygulama kimliğiyle bunu değiştirmen gerekir. -->
+        <!-- Google AdMob Uygulama Kimliği (Application ID). Bu değer
+             APK içinde herkese açık olur; gizli bir anahtar değildir.
+             Reklam birimi kimlikleri ise .env dosyasında tutulur. -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713"/>
+            android:value="ca-app-pub-4806046110318369~8354866223"/>
 
         <!-- Telefon yeniden başlatıldığında, `flutter_local_notifications`
              paketinin planlanmış bildirimleri (örn. haftalık alışveriş

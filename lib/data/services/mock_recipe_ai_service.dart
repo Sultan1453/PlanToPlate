@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../core/utils/turkish_text_utils.dart';
 import '../models/recipe.dart';
 import 'mock_recipe_dataset.dart';
@@ -32,19 +34,34 @@ class MockRecipeAiService implements RecipeAiService {
     final matchedEntry =
         _findByKeyword(normalizedInput) ?? _pickDeterministicFallback(normalizedInput);
 
-    // `Recipe.fromJson`, hem bu mock veriyi hem de (Adım 5'te) gerçek
-    // Gemini API'sinden gelecek JSON'ı AYNI ŞEKİLDE okuyabilir; çünkü ikisi
-    // de aynı formatta (title/ingredients/steps/nutrient/...) yazılmıştır.
+    // `Recipe.fromJson`, hem bu mock veriyi hem de gerçek Gemini API'sinden
+    // gelecek JSON'ı AYNI ŞEKİLDE okuyabilir; çünkü ikisi de aynı formatta
+    // (title/ingredients/steps/nutrient/...) yazılmıştır.
     return Recipe.fromJson(matchedEntry, id: id, mealType: mealType);
+  }
+
+  @override
+  Future<Recipe> generateRecipeFromPhoto({
+    required String id,
+    required Uint8List imageBytes,
+    required String mimeType,
+    required MealType mealType,
+  }) async {
+    // Mock modda gerçek görüntü tanıma yok; fotoğraf baytlarının toplamına
+    // göre deterministik bir tarif seçeriz ki her denemede aynı fotoğraf
+    // aynı sonucu versin. Gerçek Gemini anahtarı eklenince bu yol otomatik
+    // olarak gerçek görüntü analizine geçer.
+    await Future.delayed(const Duration(milliseconds: 900));
+    final fingerprint = imageBytes.fold<int>(0, (sum, b) => sum + b);
+    final index = fingerprint % mockRecipeDataset.length;
+    final entry = Map<String, dynamic>.from(mockRecipeDataset[index]);
+    entry['title'] = '${entry['title']} (Fotoğraftan)';
+    return Recipe.fromJson(entry, id: id, mealType: mealType);
   }
 
   /// Veri setindeki her yemeğin `keywords` listesini tarar; kullanıcının
   /// yazdığı (normalize edilmiş) metin bu kelimelerden birini İÇERİYORSA
   /// (`contains`) o yemeği eşleşmiş sayar.
-  ///
-  /// Örn: kullanıcı "akşama tavuk but yapsam" yazsa bile, metin içinde
-  /// "tavuk but" kelimesi GEÇTİĞİ için "Fırında Tavuk But" tarifiyle
-  /// eşleşir.
   Map<String, dynamic>? _findByKeyword(String normalizedInput) {
     for (final entry in mockRecipeDataset) {
       final keywords = entry['keywords'] as List<String>;
@@ -58,16 +75,7 @@ class MockRecipeAiService implements RecipeAiService {
   }
 
   /// Hiçbir kelime eşleşmediğinde çağrılır. Kullanıcının yazdığı metnin
-  /// harflerini sayısal bir değere çevirip (`codeUnits` toplamı), veri
-  /// setinin boyutuna göre "mod" alarak (`%`) hep 0 ile
-  /// `mockRecipeDataset.length - 1` arasında bir sayı üretiriz. Bu sayı,
-  /// veri setinden HANGİ yemeğin seçileceğini belirler.
-  ///
-  /// Bu yöntem tamamen RASTGELE (`Random()`) DEĞİLDİR; aynı metin her
-  /// zaman aynı sayıyı üretir. Bu bilinçli bir tercih: kullanıcı "Pilav"
-  /// yazıp tarif aldıktan sonra uygulamayı kapatıp tekrar açsa da (veri
-  /// setinde "pilav" olmadığı için) hep AYNI yedek tarifi görsün; rastgele
-  /// olsaydı her seferinde farklı (ve kafa karıştırıcı) bir tarif çıkardı.
+  /// harflerini sayısal bir değere çevirip deterministik indeks üretir.
   Map<String, dynamic> _pickDeterministicFallback(String normalizedInput) {
     if (normalizedInput.isEmpty) return mockRecipeDataset.first;
     final sumOfCharCodes = normalizedInput.codeUnits.fold<int>(

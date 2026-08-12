@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
@@ -19,7 +20,12 @@ Future<void> main() async {
   // Flutter motorunun (native Android/iOS tarafıyla iletişim kurabilmesi
   // için) hazır olduğundan emin oluyoruz. `Hive.initFlutter()` gibi native
   // dosya sistemine erişen bir işlem çağırmadan önce bu satır ZORUNLUDUR.
-  WidgetsFlutterBinding.ensureInitialized();
+  final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+
+  // Hive / AdMob / bildirimler hazır olana kadar native splash ekranını
+  // (krem arka plan + logo) ekranda tutar; aksi halde kullanıcı kısa bir
+  // beyaz boşluk görebilir.
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
   // `.env` dosyasını okuyup içindeki `GEMINI_API_KEY` değerini belleğe
   // yüklüyoruz. Bu satır sayesinde `dotenv.env['GEMINI_API_KEY']`
@@ -49,6 +55,9 @@ Future<void> main() async {
   // Google AdMob SDK'sını başlatıyoruz. Bu çağrı, gerçek/test reklam
   // kimliklerinden BAĞIMSIZ olarak her zaman güvenle yapılabilir.
   await AdsService.init();
+
+  // Altyapı hazır → splash'i kaldır, asıl arayüzü göster.
+  FlutterNativeSplash.remove();
 
   runApp(
     // `ProviderScope`, Riverpod'un TÜM `Provider`larının (örn. Adım 2'de
