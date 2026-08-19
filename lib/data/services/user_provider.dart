@@ -19,7 +19,16 @@ import 'subscription_service.dart';
 /// (`state_notifier` paketi, aynı referans bile olsa her atamada
 /// dinleyicileri bilgilendirir).
 class UserNotifier extends StateNotifier<User> {
-  UserNotifier() : super(HiveService.getOrCreateLocalUser());
+  UserNotifier() : super(HiveService.getOrCreateLocalUser()) {
+    ensureWeeklyUsageFresh();
+    _syncSubscriptionFromRevenueCat();
+    SubscriptionService.listenToCustomerInfoUpdates(applyCustomerInfo);
+  }
+
+  /// Hive `User` nesnesi yerinde mutasyona uğradığı için `state = state`
+  /// aynı referanstır; varsayılan `identical` kontrolü UI'ı güncellemez.
+  @override
+  bool updateShouldNotify(User old, User current) => true;
 
   /// En son [tryConsumeRecipeGeneration] çağrısında hangi kaynaktan
   /// (bonus mu, haftalık hak mı) harcama yapıldığını hatırlar; bir hata
@@ -33,6 +42,23 @@ class UserNotifier extends StateNotifier<User> {
     }
     // ignore: avoid_self_assignment (bilerek: Riverpod'a "değişti" demek için)
     state = state;
+  }
+
+  /// Haftalık AI/foto sayaçlarını gerekirse sıfırlar ve UI'ı bilgilendirir.
+  void ensureWeeklyUsageFresh() {
+    final beforeRecipe = state.weeklyRecipeGenerationCount;
+    final beforePhoto = state.weeklyPhotoUploadCount;
+    state.resetWeeklyUsageIfNeeded();
+    if (beforeRecipe != state.weeklyRecipeGenerationCount ||
+        beforePhoto != state.weeklyPhotoUploadCount) {
+      _persistAndNotify();
+    }
+  }
+
+  Future<void> _syncSubscriptionFromRevenueCat() async {
+    final customerInfo = await SubscriptionService.fetchCustomerInfo();
+    if (customerInfo == null) return;
+    applyCustomerInfo(customerInfo);
   }
 
   /// Kullanıcı yeni bir AI tarifi üretmek istediğinde ÖNCE bu metod
@@ -105,9 +131,11 @@ class UserNotifier extends StateNotifier<User> {
     int? minute,
   }) {
     state.shoppingReminderEnabled = enabled;
-    state.shoppingReminderDay = day;
-    state.shoppingReminderHour = hour;
-    state.shoppingReminderMinute = minute;
+    // Kapatırken gün/saat tercihlerini silme — kullanıcı tekrar açınca
+    // eski seçimi hatırlansın.
+    if (day != null) state.shoppingReminderDay = day;
+    if (hour != null) state.shoppingReminderHour = hour;
+    if (minute != null) state.shoppingReminderMinute = minute;
     _persistAndNotify();
   }
 }

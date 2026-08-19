@@ -18,7 +18,7 @@ part 'user.g.dart';
 /// (Nutrient, Ingredient, Recipe, WeeklyPlan dosyalarında) kullanıldı.
 @HiveType(typeId: 9)
 enum SubscriptionPlan {
-  /// Ücretsiz kullanıcı: haftalık 3 AI tarifi + 1 fotoğraf yükleme hakkı ve
+  /// Ücretsiz kullanıcı: haftalık 4 AI tarifi + 1 fotoğraf yükleme hakkı ve
   /// reklamlarla sınırlıdır.
   @HiveField(0)
   free,
@@ -53,6 +53,9 @@ enum SubscriptionPlan {
 /// sayaç bir artacak ve hemen diske kaydedilecek).
 @HiveType(typeId: 10)
 class User extends HiveObject {
+  /// Ücretsiz planda haftalık AI tarif üretimi üst sınırı.
+  static const int weeklyFreeRecipeLimit = 4;
+
   User({
     required this.id,
     this.subscriptionPlan = SubscriptionPlan.free,
@@ -83,7 +86,7 @@ class User extends HiveObject {
   DateTime? premiumExpiryDate;
 
   /// Bu hafta şu ana kadar üretilen AI tarifi sayısı. Ücretsiz kullanıcı
-  /// için üst sınır 3'tür (Kural 1).
+  /// için üst sınır [weeklyFreeRecipeLimit]'tir (Kural 1).
   @HiveField(3)
   int weeklyRecipeGenerationCount;
 
@@ -158,11 +161,12 @@ class User extends HiveObject {
 
   /// Kullanıcı şu an yeni bir AI tarifi üretebilir mi? (Kural 1 + Kural 2-B)
   /// Premium kullanıcılar için her zaman `true`. Ücretsiz kullanıcılar için:
-  /// haftalık hakkı (3) bitmediyse VEYA elinde reklam karşılığı kazanılmış
+  /// haftalık hakkı bitmediyse VEYA elinde reklam karşılığı kazanılmış
   /// bonus hakkı varsa `true` döner.
   bool get canGenerateRecipe {
     if (isPremium) return true;
-    return weeklyRecipeGenerationCount < 3 || bonusRecipeCredits > 0;
+    return weeklyRecipeGenerationCount < weeklyFreeRecipeLimit ||
+        bonusRecipeCredits > 0;
   }
 
   /// Kullanıcı şu an fotoğraf yükleyebilir mi? (Kural 1) Premium

@@ -58,6 +58,20 @@ enum IngredientCategory {
         return 'Diğer';
     }
   }
+
+  /// Market yürüyüş sırasındaki adım başlığı (1 · Manav).
+  String get routeTitle {
+    const order = [
+      IngredientCategory.produce,
+      IngredientCategory.butcher,
+      IngredientCategory.dairy,
+      IngredientCategory.pantry,
+      IngredientCategory.bakery,
+      IngredientCategory.other,
+    ];
+    final step = order.indexOf(this) + 1;
+    return '$step · $displayName';
+  }
 }
 
 /// Bir yemek tarifindeki TEK BİR malzemeyi temsil eder.

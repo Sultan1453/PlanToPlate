@@ -1,3 +1,5 @@
+import com.android.build.gradle.BaseExtension
+
 allprojects {
     repositories {
         google()
@@ -15,8 +17,21 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
+// evaluationDependsOn(":app") kaldırıldı: afterEvaluate ile çakışıyordu ve
+// eklenti compileSdk override'ını engelliyordu.
+
 subprojects {
-    project.evaluationDependsOn(":app")
+    val bumpSdk = {
+        extensions.findByType(BaseExtension::class.java)?.apply {
+            compileSdkVersion(36)
+        }
+    }
+    if (state.executed) {
+        bumpSdk()
+    } else {
+        afterEvaluate { bumpSdk() }
+    }
 }
 
 tasks.register<Delete>("clean") {

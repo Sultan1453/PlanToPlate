@@ -100,7 +100,9 @@ class IngredientAggregatorService {
     }
 
     for (final categoryIngredients in grouped.values) {
-      categoryIngredients.sort((a, b) => a.name.compareTo(b.name));
+      categoryIngredients.sort(
+        (a, b) => normalizeTurkish(a.name).compareTo(normalizeTurkish(b.name)),
+      );
     }
 
     grouped.removeWhere((_, categoryIngredients) => categoryIngredients.isEmpty);

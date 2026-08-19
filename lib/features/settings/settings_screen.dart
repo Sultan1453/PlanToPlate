@@ -1,14 +1,23 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/config/app_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/user.dart';
 import '../../data/models/weekly_plan.dart';
 import '../../data/services/ads_service.dart';
+import '../../data/services/fridge_inventory_provider.dart';
+import '../../data/services/household_prefs_provider.dart';
 import '../../data/services/notification_service.dart';
 import '../../data/services/recipe_ai_service_provider.dart';
+import '../../data/services/shopping_list_service.dart';
 import '../../data/services/subscription_service.dart';
 import '../../data/services/user_provider.dart';
+import '../../data/services/weekly_plan_provider.dart';
+import '../favorites/favorites_screen.dart';
 import '../paywall/paywall_screen.dart';
 
 /// Ayarlar ekranı: alışveriş hatırlatma bildirimi, abonelik durumu ve
@@ -49,6 +58,85 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _SectionCard(
+            title: 'Favoriler',
+            icon: Icons.favorite_outline,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.favorite, color: Colors.redAccent),
+                title: const Text('Favori tariflerim'),
+                subtitle: const Text('Kalple kaydettiğin tarifler'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const FavoritesScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _SectionCard(
+            title: 'Mutfak tercihleri',
+            icon: Icons.restaurant_outlined,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Vejetaryen'),
+                value: ref.watch(householdPrefsProvider).vegetarian,
+                onChanged: (v) {
+                  final p = ref.read(householdPrefsProvider);
+                  ref.read(householdPrefsProvider.notifier).update(
+                        p.copyWith(vegetarian: v),
+                      );
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Glutensiz'),
+                value: ref.watch(householdPrefsProvider).glutenFree,
+                onChanged: (v) {
+                  final p = ref.read(householdPrefsProvider);
+                  ref.read(householdPrefsProvider.notifier).update(
+                        p.copyWith(glutenFree: v),
+                      );
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Sadece airfryer'),
+                subtitle: const Text('Fırın önermesin'),
+                value: ref.watch(householdPrefsProvider).airFryerOnly,
+                onChanged: (v) {
+                  final p = ref.read(householdPrefsProvider);
+                  ref.read(householdPrefsProvider.notifier).update(
+                        p.copyWith(airFryerOnly: v),
+                      );
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Acı istemem'),
+                value: ref.watch(householdPrefsProvider).noSpicy,
+                onChanged: (v) {
+                  final p = ref.read(householdPrefsProvider);
+                  ref.read(householdPrefsProvider.notifier).update(
+                        p.copyWith(noSpicy: v),
+                      );
+                },
+              ),
+              Text(
+                'Bu tercihler tüm AI yemek önerilerine otomatik uygulanır.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.textMuted,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           _SectionCard(
             title: 'Abonelik',
             icon: Icons.workspace_premium_outlined,
@@ -101,6 +189,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               if (_reminderEnabled) ...[
                 const SizedBox(height: 8),
                 DropdownButtonFormField<DayOfWeek>(
+                  key: ValueKey(_reminderDay),
                   initialValue: _reminderDay,
                   decoration: const InputDecoration(labelText: 'Gün'),
                   items: DayOfWeek.values
@@ -147,7 +236,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Text(
                 isUsingRealAi
                     ? 'Tarifler doğrudan Google Gemini API\'sinden üretiliyor.'
-                    : '.env dosyana geçerli bir GEMINI_API_KEY eklediğinde uygulama otomatik olarak gerçek Gemini AI\'ya geçer; kod değişikliği gerekmez.',
+                    : 'Geçerli bir GEMINI_API_KEY ile derlediğinde (scripts/run_dev.ps1) uygulama otomatik olarak gerçek Gemini AI\'ya geçer.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
               ),
             ],
@@ -165,14 +254,77 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Text(
                 AdsService.isUsingRealAdUnits
                     ? 'Release derlemede kendi AdMob reklam birimlerin kullanılıyor.'
-                    : 'Geliştirme sırasında (debug) her zaman Google\'ın test reklamları gösterilir; bu, AdMob hesabını korumak için kasıtlıdır. Play Store\'a yayınlarken (release derleme) .env\'e gerçek kimliklerini ekleyince otomatik devreye girer.',
+                    : 'Geliştirme sırasında (debug) her zaman Google\'ın test reklamları gösterilir. Play Store release derlemesinde dart-define ile gerçek birim kimlikleri eklenince otomatik devreye girer.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
               ),
             ],
           ),
+          if (AppConfig.hasPrivacyPolicyUrl) ...[
+            const SizedBox(height: 16),
+            _SectionCard(
+              title: 'Yasal',
+              icon: Icons.privacy_tip_outlined,
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.open_in_new),
+                  title: const Text('Gizlilik politikası'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _openPrivacyPolicy,
+                ),
+              ],
+            ),
+          ],
+          if (kDebugMode) ...[
+            const SizedBox(height: 16),
+            _SectionCard(
+              title: 'Geliştirici',
+              icon: Icons.bug_report_outlined,
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.send_outlined),
+                  title: const Text('Sentry test hatası gönder'),
+                  subtitle: Text(
+                    AppConfig.hasSentry
+                        ? 'Sentry paneline bir test event yollar'
+                        : 'SENTRY_DSN yok — dart-define ile derle',
+                  ),
+                  enabled: AppConfig.hasSentry,
+                  onTap: AppConfig.hasSentry ? _sendSentryTestEvent : null,
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Future<void> _sendSentryTestEvent() async {
+    await Sentry.captureException(
+      Exception('PlanToPlate Sentry test — ${DateTime.now().toIso8601String()}'),
+      stackTrace: StackTrace.current,
+    );
+    // Event kuyruğa alındı; ağ gönderimi için kısa bekleme.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Sentry test gönderildi. 1–2 dk içinde Issues’a bak.'),
+      ),
+    );
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    final uri = Uri.tryParse(AppConfig.privacyPolicyUrl.trim());
+    if (uri == null) return;
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gizlilik politikası açılamadı.')),
+      );
+    }
   }
 
   Future<void> _pickTime() async {
@@ -187,6 +339,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         final granted = await NotificationService.requestPermission();
         if (!granted) {
           if (!mounted) return;
+          setState(() => _reminderEnabled = false);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Bildirim izni verilmedi. Hatırlatma alabilmek için telefon ayarlarından izin vermelisin.'),
@@ -199,6 +352,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           day: _reminderDay,
           hour: _reminderTime.hour,
           minute: _reminderTime.minute,
+          uncheckedItemCount: ShoppingListService.countUncheckedItems(
+            ref.read(weeklyPlanProvider),
+            ownedAtHome: ref.read(fridgeInventoryProvider).map((e) => e.name),
+          ),
         );
         ref.read(userProvider.notifier).updateShoppingReminder(
               enabled: true,

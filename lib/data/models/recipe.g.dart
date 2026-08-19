@@ -142,6 +142,8 @@ class MealTypeAdapter extends TypeAdapter<MealType> {
         return MealType.lunch;
       case 2:
         return MealType.dinner;
+      case 3:
+        return MealType.snack;
       default:
         return MealType.breakfast;
     }
@@ -158,6 +160,9 @@ class MealTypeAdapter extends TypeAdapter<MealType> {
         break;
       case MealType.dinner:
         writer.writeByte(2);
+        break;
+      case MealType.snack:
+        writer.writeByte(3);
         break;
     }
   }

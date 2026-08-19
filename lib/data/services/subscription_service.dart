@@ -39,6 +39,11 @@ class SubscriptionService {
   /// Aylık/Yıllık ürünlerini bu yetkiye bağlamalısın).
   static const String entitlementId = 'premium';
 
+  static bool _isConfigured = false;
+
+  /// RevenueCat SDK'sı başarıyla yapılandırıldı mı?
+  static bool get isConfigured => _isConfigured;
+
   /// Uygulama açılışında (main.dart'ta) BİR KERE çağrılır. `.env`
   /// dosyasındaki `REVENUECAT_API_KEY` boşsa (henüz RevenueCat hesabı
   /// kurulmadıysa) hiçbir şey yapmadan sessizce çıkar — uygulama Premium
@@ -46,11 +51,17 @@ class SubscriptionService {
   static Future<void> init(String apiKey) async {
     if (apiKey.isEmpty) return;
 
-    // Geliştirme sırasında RevenueCat'in konsola ayrıntılı log basmasını
-    // sağlar; Play Store'a yayınlarken bu satırı kaldırmana gerek yok,
-    // sadece gürültü azaltmak istersen `LogLevel.error` yapabilirsin.
-    await Purchases.setLogLevel(LogLevel.warn);
-    await Purchases.configure(PurchasesConfiguration(apiKey));
+    try {
+      // Geliştirme sırasında RevenueCat'in konsola ayrıntılı log basmasını
+      // sağlar; Play Store'a yayınlarken bu satırı kaldırmana gerek yok,
+      // sadece gürültü azaltmak istersen `LogLevel.error` yapabilirsin.
+      await Purchases.setLogLevel(LogLevel.warn);
+      await Purchases.configure(PurchasesConfiguration(apiKey));
+      _isConfigured = true;
+    } catch (_) {
+      // Geçersiz anahtar / ağ hatası uygulama açılışını ÇÖKERTMEMELİ.
+      _isConfigured = false;
+    }
   }
 
   /// RevenueCat panelinde tanımlı "şu an aktif" teklifi (Offering) getirir.
@@ -58,14 +69,24 @@ class SubscriptionService {
   /// (Package) bulunur — Paywall ekranını (Adım 7'de) bu paketler
   /// üzerinden çizeceğiz.
   static Future<Offering?> getCurrentOffering() async {
-    final offerings = await Purchases.getOfferings();
-    return offerings.current;
+    if (!_isConfigured) return null;
+    try {
+      final offerings = await Purchases.getOfferings();
+      return offerings.current;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Kullanıcı "Premium'a Geç" butonuna bastığında çağrılır. Google
   /// Play'in kendi satın alma penceresini açar; işlem tamamlanınca güncel
   /// `CustomerInfo`'yu döner.
   static Future<CustomerInfo> purchase(Package package) async {
+    if (!_isConfigured) {
+      throw PurchaseException(
+        'Abonelik sistemi henüz yapılandırılmadı. Lütfen daha sonra tekrar dene.',
+      );
+    }
     try {
       final result = await Purchases.purchase(PurchaseParams.package(package));
       return result.customerInfo;
@@ -87,6 +108,11 @@ class SubscriptionService {
   /// kurduğunda, daha önce yaptığı satın alımı geri yükler ("Satın
   /// Alımları Geri Yükle" butonu için).
   static Future<CustomerInfo> restorePurchases() async {
+    if (!_isConfigured) {
+      throw PurchaseException(
+        'Abonelik sistemi henüz yapılandırılmadı. RevenueCat anahtarını .env dosyasına ekleyip scripts ile derledikten sonra tekrar dene.',
+      );
+    }
     try {
       return await Purchases.restorePurchases();
     } catch (_) {
@@ -103,7 +129,20 @@ class SubscriptionService {
   static void listenToCustomerInfoUpdates(
     void Function(CustomerInfo customerInfo) onUpdate,
   ) {
+    if (!_isConfigured) return;
     Purchases.addCustomerInfoUpdateListener(onUpdate);
+  }
+
+  /// Uygulama açılışında güncel abonelik bilgisini çeker. İnternet yoksa
+  /// veya RevenueCat henüz yapılandırılmadıysa `null` döner; yerel Hive
+  /// kaydıyla devam edilir.
+  static Future<CustomerInfo?> fetchCustomerInfo() async {
+    if (!_isConfigured) return null;
+    try {
+      return await Purchases.getCustomerInfo();
+    } catch (_) {
+      return null;
+    }
   }
 
   /// RevenueCat'ten gelen `CustomerInfo`'yu okuyup, Adım 1'de yazdığımız

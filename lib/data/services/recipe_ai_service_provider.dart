@@ -1,48 +1,216 @@
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/config/app_config.dart';
+import '../models/fridge_suggestion.dart';
+import '../models/recipe.dart';
+import '../models/recipe_constraints.dart';
 import 'gemini_recipe_ai_service.dart';
 import 'mock_recipe_ai_service.dart';
 import 'recipe_ai_service.dart';
+import 'snack_discover_catalog.dart';
 
-/// ================================================================
-/// BAĞIMLILIK ENJEKSİYONU (Dependency Injection) NOKTASI
-/// ================================================================
-/// Uygulamanın HER YERİ, tarif üretmek istediğinde doğrudan
-/// `MockRecipeAiService()` veya `GeminiRecipeAiService()` yazmaz. Bunun
-/// yerine Riverpod'un bu TEK `Provider`ını kullanır:
-/// `ref.read(recipeAiServiceProvider)`.
-///
-/// Burada, kullanıcının `.env` dosyasına GERÇEK bir Gemini API anahtarı
-/// koyup koymadığına göre OTOMATİK bir karar veriyoruz:
-///
-/// - `.env`'de `GEMINI_API_KEY` BOŞ veya YOKSA → güvenli şekilde
-///   `MockRecipeAiService`'e (Adım 2'deki sahte motor) geri döneriz. Bu
-///   sayede API anahtarını henüz almamış biri bile uygulamayı sorunsuz
-///   çalıştırabilir.
-/// - `.env`'de GERÇEK bir anahtar VARSA → otomatik olarak
-///   `GeminiRecipeAiService`'e (gerçek yapay zeka) geçeriz.
-///
-/// Yani kullanıcı sadece `.env` dosyasına kendi anahtarını yapıştırdığı
-/// anda, uygulamanın geri kalanında (ekranlarda) TEK BİR SATIR KOD
-/// DEĞİŞTİRMEDEN gerçek Gemini API'sini kullanmaya başlar. Bu, Adım 1'de
-/// yazdığımız `RecipeAiService` soyut sözleşmesinin tam olarak var oluş
-/// sebebidir.
 final recipeAiServiceProvider = Provider<RecipeAiService>((ref) {
-  final apiKey = dotenv.env['GEMINI_API_KEY']?.trim() ?? '';
+  final apiKey = resolveGeminiApiKey();
 
-  if (apiKey.isEmpty) {
+  if (!isUsableGeminiApiKey(apiKey)) {
     return MockRecipeAiService();
   }
 
-  return GeminiRecipeAiService(apiKey: apiKey);
+  return _ResilientRecipeAiService(
+    primary: GeminiRecipeAiService(apiKey: apiKey),
+    fallback: MockRecipeAiService(),
+  );
 });
 
-/// Uygulamanın şu anda GERÇEK yapay zeka mı yoksa Mock veri seti mi
-/// kullandığını söyler. Ayarlar ekranında (ileriki bir adımda) kullanıcıya
-/// "Şu an Mock modundasın, gerçek AI için .env dosyana anahtarını ekle"
-/// gibi şeffaf bir bilgi göstermek için kullanılacak.
 final isUsingRealAiProvider = Provider<bool>((ref) {
-  final apiKey = dotenv.env['GEMINI_API_KEY']?.trim() ?? '';
-  return apiKey.isNotEmpty;
+  return isUsableGeminiApiKey(resolveGeminiApiKey());
 });
+
+/// Derleme zamanı `GEMINI_API_KEY` (`--dart-define` / `--dart-define-from-file`).
+String resolveGeminiApiKey() => AppConfig.geminiApiKey.trim();
+
+/// Placeholder / boş anahtarları gerçek Gemini çağrısından ayırır.
+bool isUsableGeminiApiKey(String apiKey) {
+  if (apiKey.isEmpty || apiKey.length < 20) return false;
+  final lower = apiKey.toLowerCase();
+  const placeholders = [
+    'your_api_key',
+    'your-api-key',
+    'changeme',
+    'replace_me',
+    'xxx',
+    'todo',
+    'paste_here',
+    'buraya_kendi',
+  ];
+  for (final placeholder in placeholders) {
+    if (lower.contains(placeholder)) return false;
+  }
+  return true;
+}
+
+class _ResilientRecipeAiService implements RecipeAiService {
+  _ResilientRecipeAiService({
+    required this.primary,
+    required this.fallback,
+  });
+
+  final RecipeAiService primary;
+  final RecipeAiService fallback;
+
+  @override
+  Future<Recipe> generateRecipe({
+    required String id,
+    required String mealName,
+    required MealType mealType,
+    RecipeConstraints constraints = const RecipeConstraints(),
+  }) async {
+    try {
+      return await primary.generateRecipe(
+        id: id,
+        mealName: mealName,
+        mealType: mealType,
+        constraints: constraints,
+      );
+    } on RecipeGenerationException {
+      return fallback.generateRecipe(
+        id: id,
+        mealName: mealName,
+        mealType: mealType,
+        constraints: constraints,
+      );
+    }
+  }
+
+  @override
+  Future<Recipe> generateRecipeFromPhoto({
+    required String id,
+    required Uint8List imageBytes,
+    required String mimeType,
+    required MealType mealType,
+    RecipeConstraints constraints = const RecipeConstraints(),
+  }) async {
+    try {
+      return await primary.generateRecipeFromPhoto(
+        id: id,
+        imageBytes: imageBytes,
+        mimeType: mimeType,
+        mealType: mealType,
+        constraints: constraints,
+      );
+    } on RecipeGenerationException {
+      return fallback.generateRecipe(
+        id: id,
+        mealName: 'Fotoğraftan yemek',
+        mealType: mealType,
+        constraints: constraints,
+      );
+    }
+  }
+
+  @override
+  Future<FridgeSuggestionResult> suggestFromIngredients({
+    required List<String> ingredients,
+    RecipeConstraints constraints = const RecipeConstraints(),
+  }) async {
+    try {
+      return await primary.suggestFromIngredients(
+        ingredients: ingredients,
+        constraints: constraints,
+      );
+    } on RecipeGenerationException {
+      return fallback.suggestFromIngredients(
+        ingredients: ingredients,
+        constraints: constraints,
+      );
+    }
+  }
+
+  @override
+  Future<List<Recipe>> generateQuickSnacks({
+    int count = 5,
+    FeedMood mood = FeedMood.all,
+    List<String> excludeTitles = const [],
+    int? varietySeed,
+  }) async {
+    try {
+      return await primary
+          .generateQuickSnacks(
+            count: count,
+            mood: mood,
+            excludeTitles: excludeTitles,
+            varietySeed: varietySeed,
+          )
+          .timeout(const Duration(seconds: 12));
+    } on RecipeGenerationException {
+      return fallback.generateQuickSnacks(
+        count: count,
+        mood: mood,
+        excludeTitles: excludeTitles,
+        varietySeed: varietySeed,
+      );
+    } on TimeoutException {
+      return fallback.generateQuickSnacks(
+        count: count,
+        mood: mood,
+        excludeTitles: excludeTitles,
+        varietySeed: varietySeed,
+      );
+    } catch (_) {
+      return fallback.generateQuickSnacks(
+        count: count,
+        mood: mood,
+        excludeTitles: excludeTitles,
+        varietySeed: varietySeed,
+      );
+    }
+  }
+
+  @override
+  Future<List<Recipe>> generateDiscoverRecipes({
+    int count = 10,
+    FeedMood mood = FeedMood.all,
+    MealType? mealType,
+    List<String> excludeTitles = const [],
+    int? varietySeed,
+  }) async {
+    try {
+      return await primary
+          .generateDiscoverRecipes(
+            count: count,
+            mood: mood,
+            mealType: mealType,
+            excludeTitles: excludeTitles,
+            varietySeed: varietySeed,
+          )
+          .timeout(const Duration(seconds: 12));
+    } on RecipeGenerationException {
+      return fallback.generateDiscoverRecipes(
+        count: count,
+        mood: mood,
+        mealType: mealType,
+        excludeTitles: excludeTitles,
+        varietySeed: varietySeed,
+      );
+    } on TimeoutException {
+      return fallback.generateDiscoverRecipes(
+        count: count,
+        mood: mood,
+        mealType: mealType,
+        excludeTitles: excludeTitles,
+        varietySeed: varietySeed,
+      );
+    } catch (_) {
+      return fallback.generateDiscoverRecipes(
+        count: count,
+        mood: mood,
+        mealType: mealType,
+        excludeTitles: excludeTitles,
+        varietySeed: varietySeed,
+      );
+    }
+  }
+}

@@ -66,6 +66,7 @@ enum CookingMethod {
         return CookingMethod.grill;
       case 'no_cook':
       case 'nocook':
+      case 'noCook':
       case 'pişirme gerektirmez':
         return CookingMethod.noCook;
       default:
@@ -87,7 +88,11 @@ enum MealType {
   lunch,
 
   @HiveField(2)
-  dinner;
+  dinner,
+
+  /// Gece krizi / ara öğün / atıştırmalık.
+  @HiveField(3)
+  snack;
 
   String get displayName {
     switch (this) {
@@ -97,6 +102,48 @@ enum MealType {
         return 'Öğle Yemeği';
       case MealType.dinner:
         return 'Akşam Yemeği';
+      case MealType.snack:
+        return 'Atıştırmalık';
+    }
+  }
+
+  String get shortDisplayName {
+    switch (this) {
+      case MealType.breakfast:
+        return 'Kahvaltı';
+      case MealType.lunch:
+        return 'Öğle';
+      case MealType.dinner:
+        return 'Akşam';
+      case MealType.snack:
+        return 'Atıştırma';
+    }
+  }
+
+  static MealType fromString(String? raw) {
+    switch (raw?.toLowerCase().trim()) {
+      case 'breakfast':
+      case 'kahvalti':
+      case 'kahvaltı':
+        return MealType.breakfast;
+      case 'lunch':
+      case 'ogle':
+      case 'öğle':
+      case 'ogle yemegi':
+        return MealType.lunch;
+      case 'dinner':
+      case 'aksam':
+      case 'akşam':
+      case 'aksam yemegi':
+        return MealType.dinner;
+      case 'snack':
+      case 'atistirmalik':
+      case 'atıştırmalık':
+      case 'ara ogun':
+      case 'ara öğün':
+        return MealType.snack;
+      default:
+        return MealType.dinner;
     }
   }
 }

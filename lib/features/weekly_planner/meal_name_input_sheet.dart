@@ -5,32 +5,42 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../data/models/recipe.dart';
+import '../../data/models/recipe_constraints.dart';
 import '../../data/services/mock_recipe_dataset.dart';
 
-/// Kullanıcının öğün ekleme sheet'inden dönebileceği iki yoldan biri:
-/// metinle yemek adı veya fotoğraftan tarif.
 class MealInputResult {
-  const MealInputResult._({this.mealName, this.photoBytes, this.photoMimeType});
+  const MealInputResult._({
+    this.mealName,
+    this.photoBytes,
+    this.photoMimeType,
+    this.constraints = const RecipeConstraints(),
+  });
 
-  factory MealInputResult.fromName(String name) => MealInputResult._(mealName: name);
+  factory MealInputResult.fromName(
+    String name, {
+    RecipeConstraints constraints = const RecipeConstraints(),
+  }) =>
+      MealInputResult._(mealName: name, constraints: constraints);
 
   factory MealInputResult.fromPhoto({
     required Uint8List bytes,
     required String mimeType,
+    RecipeConstraints constraints = const RecipeConstraints(),
   }) =>
-      MealInputResult._(photoBytes: bytes, photoMimeType: mimeType);
+      MealInputResult._(
+        photoBytes: bytes,
+        photoMimeType: mimeType,
+        constraints: constraints,
+      );
 
   final String? mealName;
   final Uint8List? photoBytes;
   final String? photoMimeType;
+  final RecipeConstraints constraints;
 
   bool get isPhoto => photoBytes != null && photoBytes!.isNotEmpty;
 }
 
-/// Kullanıcıya "Bu öğün için ne pişireceksin?" diye soran, alttan açılan
-/// (bottom sheet) form. İki yol sunar:
-/// 1) Yemek adı yaz / hızlı seçim çipleri
-/// 2) Kameradan çek veya galeriden seç → fotoğraftan tarif
 Future<MealInputResult?> showMealNameInputSheet(
   BuildContext context, {
   required MealType mealType,
@@ -66,9 +76,18 @@ class _MealNameForm extends StatefulWidget {
 class _MealNameFormState extends State<_MealNameForm> {
   final _controller = TextEditingController();
   bool _isPickingPhoto = false;
+  bool _under30 = false;
+  bool _fewIngredients = false;
+  bool _noOven = false;
 
   static final List<String> _suggestions =
       mockRecipeDataset.map((dish) => dish['title'] as String).toList();
+
+  RecipeConstraints get _constraints => RecipeConstraints(
+        maxTotalMinutes: _under30 ? 30 : null,
+        preferFewIngredients: _fewIngredients,
+        noOven: _noOven,
+      );
 
   @override
   void dispose() {
@@ -79,7 +98,9 @@ class _MealNameFormState extends State<_MealNameForm> {
   void _submitName([String? value]) {
     final text = value ?? _controller.text;
     if (text.trim().isEmpty) return;
-    Navigator.of(context).pop(MealInputResult.fromName(text.trim()));
+    Navigator.of(context).pop(
+      MealInputResult.fromName(text.trim(), constraints: _constraints),
+    );
   }
 
   Future<void> _pickPhoto(ImageSource source) async {
@@ -98,14 +119,33 @@ class _MealNameFormState extends State<_MealNameForm> {
       if (bytes.isEmpty || !mounted) return;
 
       final pathLower = file.path.toLowerCase();
-      final mimeType = pathLower.endsWith('.png')
-          ? 'image/png'
-          : pathLower.endsWith('.webp')
-              ? 'image/webp'
-              : 'image/jpeg';
+      final pickerMime = file.mimeType?.toLowerCase();
+      final mimeType = (pickerMime != null && pickerMime.startsWith('image/'))
+          ? pickerMime
+          : pathLower.endsWith('.png')
+              ? 'image/png'
+              : pathLower.endsWith('.webp')
+                  ? 'image/webp'
+                  : pathLower.endsWith('.heic') || pathLower.endsWith('.heif')
+                      ? 'image/heic'
+                      : 'image/jpeg';
+
+      if (mimeType.contains('heic') || mimeType.contains('heif')) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bu fotoğraf formatı desteklenmiyor. Lütfen JPG veya PNG dene.'),
+          ),
+        );
+        return;
+      }
 
       Navigator.of(context).pop(
-        MealInputResult.fromPhoto(bytes: bytes, mimeType: mimeType),
+        MealInputResult.fromPhoto(
+          bytes: bytes,
+          mimeType: mimeType,
+          constraints: _constraints,
+        ),
       );
     } catch (_) {
       if (!mounted) return;
@@ -119,86 +159,117 @@ class _MealNameFormState extends State<_MealNameForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '${widget.mealType.displayName} için ne pişiriyorsun?',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Bir yemek adı yaz, popüler tariflerden seç veya fotoğraftan tarif oluştur.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _controller,
-          autofocus: true,
-          textInputAction: TextInputAction.done,
-          onSubmitted: _submitName,
-          decoration: const InputDecoration(
-            hintText: 'Örn: Fırında Tavuk But',
-            prefixIcon: Icon(Icons.restaurant_menu),
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${widget.mealType.displayName} için ne pişiriyorsun?',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _suggestions
-              .map((title) => ActionChip(label: Text(title), onPressed: () => _submitName(title)))
-              .toList(),
-        ),
-        const SizedBox(height: 20),
-        Row(
-          children: [
-            Expanded(child: Divider(color: AppColors.divider)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text(
-                'VEYA FOTOĞRAFTAN',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppColors.textMuted),
-              ),
+          const SizedBox(height: 6),
+          Text(
+            'Yemek adı yaz, filtre seç veya fotoğraftan tarif oluştur.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: _submitName,
+            decoration: const InputDecoration(
+              hintText: 'Örn: Fırında Tavuk But',
+              prefixIcon: Icon(Icons.restaurant_menu),
             ),
-            Expanded(child: Divider(color: AppColors.divider)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _isPickingPhoto ? null : () => _pickPhoto(ImageSource.camera),
-                icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Kamera'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _isPickingPhoto ? null : () => _pickPhoto(ImageSource.gallery),
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Galeri'),
-              ),
-            ),
-          ],
-        ),
-        if (_isPickingPhoto) ...[
+          ),
           const SizedBox(height: 12),
-          const Center(child: CircularProgressIndicator()),
-        ],
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _isPickingPhoto ? null : () => _submitName(),
-            child: const Text('Tarifi Oluştur'),
+          Text(
+            'Tercihler',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppColors.textMuted,
+                ),
           ),
-        ),
-        const SizedBox(height: 8),
-      ],
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilterChip(
+                label: const Text('30 dk altı'),
+                selected: _under30,
+                onSelected: (v) => setState(() => _under30 = v),
+              ),
+              FilterChip(
+                label: const Text('Az malzeme'),
+                selected: _fewIngredients,
+                onSelected: (v) => setState(() => _fewIngredients = v),
+              ),
+              FilterChip(
+                label: const Text('Fırın yok'),
+                selected: _noOven,
+                onSelected: (v) => setState(() => _noOven = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _suggestions
+                .map((title) => ActionChip(label: Text(title), onPressed: () => _submitName(title)))
+                .toList(),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(child: Divider(color: AppColors.divider)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text(
+                  'VEYA FOTOĞRAFTAN',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(color: AppColors.textMuted),
+                ),
+              ),
+              Expanded(child: Divider(color: AppColors.divider)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isPickingPhoto ? null : () => _pickPhoto(ImageSource.camera),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: const Text('Kamera'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isPickingPhoto ? null : () => _pickPhoto(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Galeri'),
+                ),
+              ),
+            ],
+          ),
+          if (_isPickingPhoto) ...[
+            const SizedBox(height: 12),
+            const Center(child: CircularProgressIndicator()),
+          ],
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _isPickingPhoto ? null : () => _submitName(),
+              child: const Text('Tarifi Oluştur'),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }

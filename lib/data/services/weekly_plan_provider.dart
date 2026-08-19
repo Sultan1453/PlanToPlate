@@ -6,6 +6,7 @@ import '../models/ingredient.dart';
 import '../models/recipe.dart';
 import '../models/weekly_plan.dart';
 import 'hive_service.dart';
+import 'shopping_list_exchange.dart';
 import 'shopping_list_service.dart';
 
 /// Kullanıcının ŞU AN görüntülediği haftalık planı (`WeeklyPlan`) tutan
@@ -18,6 +19,13 @@ import 'shopping_list_service.dart';
 class WeeklyPlanNotifier extends StateNotifier<WeeklyPlan> {
   WeeklyPlanNotifier() : super(_loadOrCreateCurrentWeek());
 
+  /// HiveObject'i yerinde değiştirdiğimiz için `state = state` aynı
+  /// referansı atar. StateNotifier varsayılanı `identical` ise bildirimi
+  /// atlar — alışveriş listesi / öğün ekleme ekranda görünmez. Her zaman
+  /// dinleyicileri uyar.
+  @override
+  bool updateShouldNotify(WeeklyPlan old, WeeklyPlan current) => true;
+
   /// Uygulama açıldığında, içinde bulunduğumuz haftaya ait bir
   /// `WeeklyPlan` var mı diye Hive kutusunda arar; yoksa (örn. uygulama
   /// ilk kez açıldıysa veya yeni bir haftaya geçildiyse) BOŞ bir tane
@@ -28,6 +36,7 @@ class WeeklyPlanNotifier extends StateNotifier<WeeklyPlan> {
 
     for (final plan in box.values) {
       if (isSameCalendarDay(plan.weekStartDate, thisWeekStart)) {
+        plan.ensureMealSlots();
         return plan;
       }
     }
@@ -52,6 +61,7 @@ class WeeklyPlanNotifier extends StateNotifier<WeeklyPlan> {
 
     for (final plan in box.values) {
       if (isSameCalendarDay(plan.weekStartDate, normalized)) {
+        plan.ensureMealSlots();
         return plan;
       }
     }
@@ -80,16 +90,41 @@ class WeeklyPlanNotifier extends StateNotifier<WeeklyPlan> {
   bool get isViewingCurrentWeek =>
       isSameCalendarDay(state.weekStartDate, startOfWeek(DateTime.now()));
 
-  /// Belirli bir gün/öğün hücresine bir tarif atar. AI üretimi bittiğinde
-  /// (bkz. `WeeklyPlannerScreen`) çağrılır.
-  void assignRecipe(DayOfWeek day, MealType mealType, Recipe recipe) {
+  /// Belirli bir gün/öğün hücresine bir tarif atar. AI üretimi sırasında
+  /// kullanıcı hafta değiştirmiş olsa bile tarifi ÜRETİM BAŞINDA seçili
+  /// olan haftaya yazar.
+  void assignRecipeForWeek({
+    required DateTime weekStartDate,
+    required DayOfWeek day,
+    required MealType mealType,
+    required Recipe recipe,
+  }) {
+    if (!isSameCalendarDay(state.weekStartDate, weekStartDate)) {
+      state = _loadOrCreateWeek(weekStartDate);
+    }
     state.mealFor(day, mealType).recipe = recipe;
+    _persistAndNotify();
+  }
+
+  /// Gömülü tarif (porsiyon ölçekleme vb.) değişince planı kaydeder.
+  void persistCurrentPlan() {
+    _persistAndNotify();
+  }
+
+  /// Ortak listeyi (eş/arkadaş) mevcut plana birleştirir.
+  void importSharedShoppingList(String raw, {bool replaceManual = false}) {
+    ShoppingListExchange.importIntoPlan(
+      state,
+      raw,
+      replaceManual: replaceManual,
+    );
     _persistAndNotify();
   }
 
   /// Bir hücredeki tarifi kaldırır (kullanıcı "kaldır" dediğinde).
   void clearMeal(DayOfWeek day, MealType mealType) {
     state.mealFor(day, mealType).recipe = null;
+    ShoppingListService.pruneStaleCheckedKeys(state);
     _persistAndNotify();
   }
 

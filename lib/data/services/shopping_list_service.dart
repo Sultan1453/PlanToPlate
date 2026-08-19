@@ -1,6 +1,8 @@
 import '../models/ingredient.dart';
 import '../models/weekly_plan.dart';
+import '../../core/utils/turkish_text_utils.dart';
 import 'ingredient_aggregator_service.dart';
+import 'purchase_unit_normalizer.dart';
 
 /// Alışveriş listesindeki TEK BİR satırı ekrana çizmek için hazırlanmış
 /// "görüntü modeli" (view model).
@@ -44,41 +46,114 @@ class ShoppingListService {
   /// Belirli bir haftalık plan için TAM alışveriş listesini oluşturur:
   /// tariflerden otomatik toplanan malzemeler + kullanıcının manuel
   /// eklediği ürünler, hepsi birlikte kategoriye göre gruplanmış olarak.
+  ///
+  /// Not: UI artık sekmeleri ayırdığı için [buildAutoShoppingList] /
+  /// [buildManualShoppingList] kullanır; bu metod testler ve geriye
+  /// uyumluluk için durur.
+  ///
+  /// [ownedAtHome]: Evdekiler listesindeki malzemeler; otomatik listeden
+  /// çıkarılır (kullanıcı zaten evde olduğunu bildirmiştir).
   static Map<IngredientCategory, List<ShoppingListEntry>> buildShoppingList(
-    WeeklyPlan plan,
-  ) {
-    final autoIngredients = IngredientAggregatorService.aggregate(plan);
+    WeeklyPlan plan, {
+    Iterable<String> ownedAtHome = const [],
+  }) {
+    final autoGrouped = buildAutoShoppingList(plan, ownedAtHome: ownedAtHome);
+    final manualEntries = buildManualShoppingList(plan);
 
-    final autoEntries = autoIngredients.map((ingredient) {
+    final Map<IngredientCategory, List<ShoppingListEntry>> grouped = {
+      for (final category in IngredientAggregatorService.marketVisitOrder) category: [
+        ...?autoGrouped[category],
+      ],
+    };
+    for (final entry in manualEntries) {
+      grouped[entry.ingredient.category]!.add(entry);
+    }
+    for (final categoryEntries in grouped.values) {
+      categoryEntries.sort(
+        (a, b) => normalizeTurkish(a.ingredient.name)
+            .compareTo(normalizeTurkish(b.ingredient.name)),
+      );
+    }
+    grouped.removeWhere((_, categoryEntries) => categoryEntries.isEmpty);
+    return grouped;
+  }
+
+  /// Sadece haftalık plandaki tariflerden gelen malzemeler (reyonlara göre).
+  /// Tarif ölçüleri (kaşık, tutam...) markette alınabilir birime çevrilir.
+  ///
+  /// [ownedAtHome] içindeki ürünler listede gösterilmez.
+  static Map<IngredientCategory, List<ShoppingListEntry>> buildAutoShoppingList(
+    WeeklyPlan plan, {
+    Iterable<String> ownedAtHome = const [],
+  }) {
+    final ownedKeys = ownedAtHome
+        .map((e) => normalizeTurkish(e.trim()))
+        .where((e) => e.isNotEmpty)
+        .toSet();
+
+    final autoIngredients = PurchaseUnitNormalizer.normalizeList(
+      IngredientAggregatorService.aggregate(plan),
+    );
+
+    final autoEntries = autoIngredients
+        .where((ingredient) => !_isOwnedAtHome(ingredient.name, ownedKeys))
+        .map((ingredient) {
       final key = IngredientAggregatorService.mergeKeyFor(ingredient);
-      // Otomatik toplanan malzeme her seferinde SIFIRDAN (isChecked: false)
-      // oluşturulduğu için, kalıcı olarak kaydedilmiş işaretli durumunu
-      // burada geri "giydiriyoruz".
       ingredient.isChecked = plan.checkedAutoItemKeys.contains(key);
       return ShoppingListEntry(ingredient: ingredient, isManual: false, mergeKey: key);
-    });
+    }).toList();
 
-    final manualEntries = plan.manualItems.map((ingredient) {
+    final Map<IngredientCategory, List<ShoppingListEntry>> grouped = {
+      for (final category in IngredientAggregatorService.marketVisitOrder) category: [],
+    };
+    for (final entry in autoEntries) {
+      grouped[entry.ingredient.category]!.add(entry);
+    }
+    for (final categoryEntries in grouped.values) {
+      categoryEntries.sort(
+        (a, b) => normalizeTurkish(a.ingredient.name)
+            .compareTo(normalizeTurkish(b.ingredient.name)),
+      );
+    }
+    grouped.removeWhere((_, categoryEntries) => categoryEntries.isEmpty);
+    return grouped;
+  }
+
+  /// Evdekiler kaydı ile tarif malzemesi eşleşiyor mu?
+  /// Kısa token'larda (su, un…) yalnızca tam eşleşme; aksi halde yanlış gizleme olur.
+  static bool _isOwnedAtHome(String ingredientName, Set<String> ownedKeys) {
+    if (ownedKeys.isEmpty) return false;
+    final name = normalizeTurkish(ingredientName);
+    if (name.isEmpty) return false;
+    for (final owned in ownedKeys) {
+      if (owned.isEmpty) continue;
+      if (name == owned) return true;
+      // Çok kısa isimler (su, un, et…) yalnızca exact match.
+      if (owned.length < 4 || name.length < 4) continue;
+      final nameTokens = name.split(RegExp(r'\s+'));
+      final ownedTokens = owned.split(RegExp(r'\s+'));
+      if (nameTokens.contains(owned) || ownedTokens.contains(name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Kullanıcının elle eklediği ev ihtiyaçları (yemek planından bağımsız).
+  static List<ShoppingListEntry> buildManualShoppingList(WeeklyPlan plan) {
+    final entries = plan.manualItems.map((ingredient) {
       return ShoppingListEntry(
         ingredient: ingredient,
         isManual: true,
         mergeKey: IngredientAggregatorService.mergeKeyFor(ingredient),
       );
-    });
+    }).toList();
 
-    final allEntries = [...autoEntries, ...manualEntries];
-
-    final Map<IngredientCategory, List<ShoppingListEntry>> grouped = {
-      for (final category in IngredientAggregatorService.marketVisitOrder) category: [],
-    };
-    for (final entry in allEntries) {
-      grouped[entry.ingredient.category]!.add(entry);
-    }
-    for (final categoryEntries in grouped.values) {
-      categoryEntries.sort((a, b) => a.ingredient.name.compareTo(b.ingredient.name));
-    }
-    grouped.removeWhere((_, categoryEntries) => categoryEntries.isEmpty);
-    return grouped;
+    entries.sort(
+      (a, b) => normalizeTurkish(a.ingredient.name)
+          .compareTo(normalizeTurkish(b.ingredient.name)),
+    );
+    return entries;
   }
 
   /// Bir satırın "evde var / alındı" işaretini AÇAR/KAPATIR ve değişikliği
@@ -127,6 +202,36 @@ class ShoppingListService {
   static void removeManualItem(WeeklyPlan plan, Ingredient ingredient) {
     plan.manualItems.remove(ingredient);
     _saveIfInBox(plan);
+  }
+
+  /// Tarif kaldırıldığında artık listede olmayan otomatik satırların
+  /// "alındı" işaretlerini temizler; aksi halde aynı malzeme tekrar
+  /// eklenince yanlışlıkla işaretli görünebilir.
+  static void pruneStaleCheckedKeys(WeeklyPlan plan) {
+    final validKeys = PurchaseUnitNormalizer.normalizeList(
+      IngredientAggregatorService.aggregate(plan),
+    ).map(IngredientAggregatorService.mergeKeyFor).toSet();
+    plan.checkedAutoItemKeys.removeWhere((key) => !validKeys.contains(key));
+  }
+
+  /// İşaretlenmemiş (alınacak) otomatik + manuel ürün sayısı.
+  /// [ownedAtHome] verilirse alışveriş ekranıyla aynı filtre uygulanır.
+  static int countUncheckedItems(
+    WeeklyPlan plan, {
+    Iterable<String> ownedAtHome = const [],
+  }) {
+    final auto = buildAutoShoppingList(plan, ownedAtHome: ownedAtHome);
+    final manual = buildManualShoppingList(plan);
+    var count = 0;
+    for (final list in auto.values) {
+      for (final e in list) {
+        if (!e.ingredient.isChecked) count++;
+      }
+    }
+    for (final e in manual) {
+      if (!e.ingredient.isChecked) count++;
+    }
+    return count;
   }
 
   /// `HiveObject.save()`, nesne HENÜZ bir Hive kutusuna eklenmemişse

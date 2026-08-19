@@ -4,77 +4,71 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../models/weekly_plan.dart';
 
-/// Alışveriş hatırlatma bildirimlerini yöneten servis.
-///
-/// Kullanılan paket: `flutter_local_notifications`. Bu paket, İNTERNET
-/// GEREKTİRMEDEN, doğrudan telefonun kendi bildirim sistemine planlı
-/// (zamanlanmış) bildirim ekler — sunucu, push notification altyapısı
-/// (Firebase vb.) gerekmez, bu yüzden basit ve ücretsizdir.
 class NotificationService {
   NotificationService._();
 
   static final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 
-  /// Alışveriş hatırlatma bildirimine SABİT bir kimlik (id) veriyoruz.
-  /// Böylece kullanıcı ayarlardan gün/saati değiştirdiğinde, ESKİ
-  /// bildirimin üzerine YENİSİNİ planlarız (aynı id ile tekrar
-  /// `zonedSchedule` çağırmak, öncekini otomatik değiştirir); iki farklı
-  /// bildirim birikip kullanıcıyı rahatsız etmez.
   static const int shoppingReminderNotificationId = 1;
+  static const int prepReminderNotificationIdBase = 2000;
+  static const String shoppingPayload = 'shopping';
+  static const String prepPayload = 'prep';
 
   static const String _channelId = 'shopping_reminders';
   static const String _channelName = 'Alışveriş Hatırlatmaları';
   static const String _channelDescription =
       'Haftalık alışveriş listeni kontrol etme hatırlatması';
 
-  /// Uygulama açılışında (main.dart'ta, Hive'dan sonra) BİR KERE çağrılır.
-  /// Bildirim eklentisini başlatır ve saat dilimi (timezone) veritabanını
-  /// yükler — zamanlanmış bildirimlerin DOĞRU saatte gelmesi için bu veri
-  /// tabanı gereklidir (örn. yaz/kış saati uygulamasını doğru hesaplamak
-  /// için).
+  static const String _prepChannelId = 'prep_reminders';
+  static const String _prepChannelName = 'Ön hazırlık';
+  static const String _prepChannelDescription =
+      'Buzluk / ön hazırlık hatırlatmaları';
+
+  /// Bildirime tıklanınca (veya soğuk açılışta) çağrılır.
+  static void Function(String? payload)? onNotificationOpened;
+
   static Future<void> init() async {
     tz_data.initializeTimeZones();
-
-    // NOT: Uygulamanın şu anki hedef kitlesi Türkiye olduğu için saat
-    // dilimini sabit "Europe/Istanbul" olarak ayarlıyoruz. İleride
-    // uygulama başka ülkelere açılırsa, cihazın GERÇEK saat dilimini
-    // otomatik algılamak için `flutter_timezone` paketi eklenip bu satır
-    // dinamik hale getirilebilir.
     tz.setLocalLocation(tz.getLocation('Europe/Istanbul'));
 
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidSettings);
-    await _plugin.initialize(settings: initSettings);
+    await _plugin.initialize(
+      settings: initSettings,
+      onDidReceiveNotificationResponse: (response) {
+        onNotificationOpened?.call(response.payload);
+      },
+    );
 
-    // Android'de bildirimlerin göründüğü "kanalı" (channel) önceden
-    // oluşturuyoruz. Android 8.0 (API 26) ve üzerinde her bildirim bir
-    // kanala ait OLMAK ZORUNDADIR; kullanıcı bu kanalı (isterse) ayarlardan
-    // tamamen kapatabilir, bu da uygulamanın "iyi vatandaş" davranışının
-    // bir parçasıdır.
     const channel = AndroidNotificationChannel(
       _channelId,
       _channelName,
       description: _channelDescription,
       importance: Importance.defaultImportance,
     );
-    await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+    const prepChannel = AndroidNotificationChannel(
+      _prepChannelId,
+      _prepChannelName,
+      description: _prepChannelDescription,
+      importance: Importance.defaultImportance,
+    );
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.createNotificationChannel(channel);
+    await androidPlugin?.createNotificationChannel(prepChannel);
   }
 
-  /// Android 13 (API 33) ve üzeri sürümlerde, bildirim göstermek için
-  /// kullanıcıdan ÇALIŞMA ZAMANINDA (runtime) açık izin istemek ZORUNLUDUR
-  /// (eski Android sürümlerinde bildirim izni otomatik verilirdi, artık
-  /// değil). Bu metod o izni ister ve kullanıcının kararını (`true`/`false`)
-  /// döner.
-  ///
-  /// Kullanıcı izni REDDEDERSE (`false` dönerse), uygulamanın ÇÖKMEMESİ
-  /// gerekir — sadece bildirim gösterilemez, ayarlar ekranında bunu şık bir
-  /// mesajla kullanıcıya bildireceğiz (Adım 6/7'de arayüzü yazarken).
-  ///
-  /// Android 13'ten ESKİ sürümlerde bu metodun çağrılması güvenlidir; paket
-  /// gerekmediğini kendisi anlar ve `true` döner.
+  /// Uygulama bildirimden açıldıysa payload döner.
+  static Future<String?> consumeLaunchPayload() async {
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details?.didNotificationLaunchApp == true) {
+      return details!.notificationResponse?.payload;
+    }
+    return null;
+  }
+
   static Future<bool> requestPermission() async {
     final androidPlugin = _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -82,25 +76,23 @@ class NotificationService {
     return granted ?? false;
   }
 
-  /// Kullanıcının Ayarlar ekranından seçtiği gün ve saate göre, HER HAFTA
-  /// tekrar eden bir alışveriş hatırlatma bildirimi kurar.
-  ///
-  /// `matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime`
-  /// kullanmamızın sebebi: bu ayar, bildirime "sadece BİR KERE değil, her
-  /// hafta bu gün ve bu saatte tekrar et" der. Böylece kullanıcı bildirimi
-  /// bir kez kurduktan sonra, biz her hafta yeniden kurmak zorunda kalmayız.
   static Future<void> scheduleWeeklyShoppingReminder({
     required DayOfWeek day,
     required int hour,
     required int minute,
+    int? uncheckedItemCount,
   }) async {
     final firstOccurrence = _nextInstanceOfDayAndTime(day, hour, minute);
+    final body = (uncheckedItemCount != null && uncheckedItemCount > 0)
+        ? 'Listende yaklaşık $uncheckedItemCount ürün var. Kontrol et!'
+        : 'Listeni kontrol ettin mi?';
 
     await _plugin.zonedSchedule(
       id: shoppingReminderNotificationId,
       title: 'Alışveriş günün geldi! 🛒',
-      body: 'Listeni kontrol ettin mi?',
+      body: body,
       scheduledDate: firstOccurrence,
+      payload: shoppingPayload,
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
@@ -110,42 +102,55 @@ class NotificationService {
           priority: Priority.defaultPriority,
         ),
       ),
-      // Kesin/hassas alarm izni (Android 12+ "tam zamanlı alarm" izni)
-      // GEREKTİRMEYEN, pil dostu bir zamanlama modu seçiyoruz. Bu
-      // hatırlatma için saniyesi saniyesine gelmesi kritik değil; telefon
-      // uykudayken bile birkaç dakika içinde ulaşması yeterlidir. Bu
-      // seçim, kullanıcıdan EK bir "tam zamanlı alarm" izni istemekten
-      // kaçınmamızı sağlar.
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
     );
   }
 
-  /// Alışveriş hatırlatmasını tamamen kapatır (kullanıcı ayarlardan
-  /// bildirimi kapattığında çağrılır).
   static Future<void> cancelShoppingReminder() async {
     await _plugin.cancel(id: shoppingReminderNotificationId);
   }
 
-  /// Verilen `DayOfWeek` ve saatten, "bundan sonraki en yakın" tarih/saat
-  /// anını hesaplar. Örn: bugün Çarşamba ve kullanıcı "Cumartesi 10:00"
-  /// seçtiyse, bu fonksiyon önümüzdeki Cumartesi 10:00'ı bulur (eğer bugün
-  /// zaten Cumartesi ve saat 10:00'ı henüz geçmediyse, BUGÜNÜ döner).
+  /// [hoursFromNow] saat sonra tek seferlik ön hazırlık bildirimi.
+  static Future<void> schedulePrepReminder({
+    required String recipeTitle,
+    required int hoursFromNow,
+  }) async {
+    final hours = hoursFromNow.clamp(1, 72);
+    final when = tz.TZDateTime.now(tz.local).add(Duration(hours: hours));
+    final id = prepReminderNotificationIdBase +
+        (recipeTitle.hashCode.abs() % 500);
+
+    await _plugin.zonedSchedule(
+      id: id,
+      title: 'Ön hazırlık zamanı 🧊',
+      body: '"$recipeTitle" için hazırlığa başla (buzluk / marine).',
+      scheduledDate: when,
+      payload: prepPayload,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _prepChannelId,
+          _prepChannelName,
+          channelDescription: _prepChannelDescription,
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+        ),
+      ),
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    );
+  }
+
   static tz.TZDateTime _nextInstanceOfDayAndTime(DayOfWeek day, int hour, int minute) {
     final now = tz.TZDateTime.now(tz.local);
     var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
     final targetWeekday = _dartWeekdayFor(day);
 
-    // Doğru güne denk gelene VE henüz geçmemiş olana kadar, gün gün ileri
-    // sarıyoruz. En fazla 7 kere döner (bir haftadan uzun sürmez).
     while (scheduled.weekday != targetWeekday || scheduled.isBefore(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;
   }
 
-  /// Bizim `DayOfWeek` enum'ımızı (monday=0..sunday=6), Dart'ın kendi
-  /// `DateTime.weekday` değerine (monday=1..sunday=7) çevirir.
   static int _dartWeekdayFor(DayOfWeek day) {
     switch (day) {
       case DayOfWeek.monday:

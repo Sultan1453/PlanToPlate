@@ -1,0 +1,13 @@
+# Android release imza şablonu
+#
+# 1) Keystore oluştur (bir kez):
+#    keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# 2) Bu dosyayı `android/key.properties` olarak kopyala ve değerleri doldur.
+# 3) `upload-keystore.jks` dosyasını `android/` altına koy (veya storeFile yolunu ayarla).
+# 4) key.properties ve .jks ASLA git'e eklenmez (android/.gitignore).
+
+storePassword=BURAYA_STORE_SIFRE
+keyPassword=BURAYA_KEY_SIFRE
+keyAlias=upload
+storeFile=upload-keystore.jks

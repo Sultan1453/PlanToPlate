@@ -7,6 +7,13 @@ import '../../data/services/ads_service.dart';
 import '../../data/services/subscription_service.dart';
 import '../../data/services/user_provider.dart';
 
+/// Paywall'ın hangi nedenle açıldığını belirtir; başlık metni buna göre değişir.
+enum PaywallReason {
+  recipeQuota,
+  photoQuota,
+  generic,
+}
+
 /// Kural 2'nin ekranı: kullanıcının haftalık ücretsiz AI hakkı dolduğunda
 /// açılan Premium teklif ekranı. İki seçenek sunar:
 ///
@@ -16,7 +23,9 @@ import '../../data/services/user_provider.dart';
 /// B) "Reklam İzle, +1 AI Tarifi Kazan": Google AdMob ödüllü reklamı
 ///    izleyip anında +1 hak kazanma.
 class PaywallScreen extends ConsumerStatefulWidget {
-  const PaywallScreen({super.key});
+  const PaywallScreen({super.key, this.reason = PaywallReason.generic});
+
+  final PaywallReason reason;
 
   @override
   ConsumerState<PaywallScreen> createState() => _PaywallScreenState();
@@ -49,7 +58,11 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           const Icon(Icons.workspace_premium, size: 72, color: AppColors.accentOrange),
           const SizedBox(height: 12),
           Text(
-            'Bu haftaki ücretsiz AI tarifi hakkın doldu',
+            switch (widget.reason) {
+              PaywallReason.photoQuota => 'Bu haftaki fotoğraf hakkın doldu',
+              PaywallReason.recipeQuota => 'Bu haftaki ücretsiz AI tarifi hakkın doldu',
+              PaywallReason.generic => 'Premium ile sınırsız planla',
+            },
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
@@ -94,6 +107,25 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
           );
         }
 
+        if (snapshot.hasError || !SubscriptionService.isConfigured) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  const Icon(Icons.storefront_outlined, color: AppColors.textMuted, size: 32),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Abonelik mağazası henüz yapılandırılmadı. RevenueCat panelinden ürünlerini oluşturup REVENUECAT_API_KEY ile derleyince bu alan otomatik dolacak.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
         final offering = snapshot.data;
         final packages = offering?.availablePackages ?? const <Package>[];
 
@@ -109,7 +141,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                   const Icon(Icons.storefront_outlined, color: AppColors.textMuted, size: 32),
                   const SizedBox(height: 8),
                   Text(
-                    'Abonelik mağazası henüz yapılandırılmadı. RevenueCat panelinden ürünlerini oluşturup .env dosyasına anahtarını ekleyince bu alan otomatik dolacak.',
+                    'Abonelik mağazası henüz yapılandırılmadı. RevenueCat panelinden ürünlerini oluşturup REVENUECAT_API_KEY ile derleyince bu alan otomatik dolacak.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
                   ),

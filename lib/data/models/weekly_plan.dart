@@ -163,13 +163,44 @@ class WeeklyPlan extends HiveObject {
     return result;
   }
 
+  /// Bu hafta plana eklenmiş tarif başlıkları (tekrar önlemede kullanılır).
+  List<String> get plannedRecipeTitles {
+    return meals
+        .where((m) => m.recipe != null)
+        .map((m) => m.recipe!.title.trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+  }
+
+  /// Eski planlarda (21 slot) atıştırmalık yoksa ekler.
+  void ensureMealSlots() {
+    var changed = false;
+    final next = List<PlannedMeal>.from(meals);
+    for (final day in DayOfWeek.values) {
+      for (final mealType in MealType.values) {
+        final exists = next.any((m) => m.day == day && m.mealType == mealType);
+        if (!exists) {
+          next.add(PlannedMeal(day: day, mealType: mealType));
+          changed = true;
+        }
+      }
+    }
+    if (!changed) return;
+    meals = next;
+    if (isInBox) {
+      save();
+    }
+  }
+
   /// Belirli bir gün ve öğün için planlanan hücreyi bulur.
-  /// Örn: `plan.mealFor(DayOfWeek.tuesday, MealType.dinner)`
-  /// Bu, planlayıcı ekranını yaparken her hücreyi çizmek için kullanacağımız
-  /// ana yardımcı metod olacak.
   PlannedMeal mealFor(DayOfWeek day, MealType mealType) {
-    return meals.firstWhere(
-      (m) => m.day == day && m.mealType == mealType,
-    );
+    ensureMealSlots();
+    for (final m in meals) {
+      if (m.day == day && m.mealType == mealType) return m;
+    }
+    final created = PlannedMeal(day: day, mealType: mealType);
+    meals = List<PlannedMeal>.from(meals)..add(created);
+    if (isInBox) save();
+    return created;
   }
 }
